@@ -32,8 +32,8 @@ joined_data = Join.apply(
     keys2=["email"]
 )
 
-# Keep only accelerometer columns
-columns_to_keep = ["user", "timeStamp", "x", "y", "z"]
+# Keep required columns, including timestamp
+columns_to_keep = ["user", "timestamp", "x", "y", "z"]
 accelerometer_trusted = joined_data.select_fields(columns_to_keep)
 
 # Write to Trusted Zone
