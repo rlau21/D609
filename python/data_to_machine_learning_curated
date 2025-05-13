@@ -1,0 +1,63 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsglue.dynamicframe import DynamicFrame
+
+args = getResolvedOptions(sys.argv, ["JOB_NAME"])
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args["JOB_NAME"], args)
+
+# Load DataFrames
+step_df = glueContext.create_dynamic_frame.from_catalog(
+    database="stedi", table_name="step_trainer_trusted"
+).toDF().alias("step")
+
+accel_df = glueContext.create_dynamic_frame.from_catalog(
+    database="stedi", table_name="accelerometer_trusted"
+).toDF().alias("accel")
+
+cust_df = glueContext.create_dynamic_frame.from_catalog(
+    database="stedi", table_name="customer_curated"
+).toDF().alias("cust")
+
+# Join 1: accel to step (timestamp match)
+step_accel = step_df.join(
+    accel_df,
+    step_df["sensorReadingTime"] == accel_df["timestamp"],
+    "inner"
+).alias("step_accel")
+
+# Join 2: keep only customers who agreed to share data
+final_join = step_accel.join(
+    cust_df,
+    step_accel["user"] == cust_df["email"],
+    "inner"
+)
+
+# Select relevant fields for ML
+ml_df = final_join.select(
+    "user",
+    "timestamp",
+    "x", "y", "z",
+    "step_accel.serialNumber",
+    "distanceFromObject"
+)
+
+# Convert to DynamicFrame
+ml_dyf = DynamicFrame.fromDF(ml_df, glueContext, "ml_dyf")
+
+# Write to S3
+glueContext.write_dynamic_frame.from_options(
+    frame=ml_dyf,
+    connection_type="s3",
+    connection_options={"path": "s3://stedi-lakehouse-roblau/machine_learning_curated/"},
+    format="json"
+)
+
+job.commit()
